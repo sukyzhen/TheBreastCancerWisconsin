@@ -1,0 +1,288 @@
+---
+title: "TheBreastCancerWisconsin(Diagnostic)"
+output:
+  html_notebook: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+The Breast Cancer Wisconsin (Diagnostic) belongs to UCI. Using this data, we can help diagnose patients and predict the likelihood of a breast cancer. I want to perform a Breast cancer detection to understand patterns and try to make some Breast cancer detections by applying machine learning, such as Neural Network, Decision Tree, K-means, Support Vector Machines and Naïve Bayes. 
+ 
+Let’s explain in a brief analogy: Let's say you believe you had cancer. If you went to one doctor, there is a significant chance of misdiagnosis (in ML, mis-classifictation). Now, what if you went to a panel of 100 doctors? You would be much more confident in the collective diagnosis of these doctors and is more likely to be accurate. Similarly, using multiple models rather than one machine learning model is a good way of improving accuracy.
+
+As a starting point for analyzing the data: 30 different attributes from images which describe characteristics of the cell nuclei present in the image. In the project, I try to make some Breast cancer detections by using the Wisconsin breast cancer diagnostic data set for predictive analysis.
+
+Data from: https://www.kaggle.com/uciml/breast-cancer-wisconsin-data
+
+Project Scope¶
+
+•	Overview
+1.	What is the "big picture" of this dataset?
+This dataset includes two main data: 357 benign, 212 malignant.
+Also, the dataset includes a set of 30 features describing the characteristics.
+All feature values are recorded with four significant digits.
+2.	Who collected this dataset?
+Features are computed from a digitized image of a fine needle aspirate (FNA) of a breast mass. They describe characteristics of the cell nuclei present in the image. n the 3-dimensional space is that described in: [K. P. Bennett and O. L. Mangasarian: "Robust Linear Programming Discrimination of Two Linearly Inseparable Sets", Optimization Methods and Software 1, 1992, 23-34].
+
+3.	What are the different variables, what do they mean and what are their units?
+1) ID number
+2) Diagnosis (M = malignant, B = benign)
+3) Ten real-valued features are computed for each cell nucleus these features includes The mean, standard error (SE) and “worst” or largest (mean of the three largest values) so it is a set of 30 features 10*3=30 For instance, field 3 is Mean Radius, field 13 is Radius SE, field 23 is Worst Radius.
+a) radius (mean of distances from the center to points on the perimeter)
+b) texture (standard deviation of gray-scale values)
+c) perimeter
+d) area
+e) smoothness (local variation in radius lengths)
+f) compactness (perimeter^2 / area - 1.0)
+g). concavity (severity of concave portions of the contour)
+h). concave points (number of concave portions of the contour)
+i). symmetry
+j). fractal dimension ("coastline approximation" - 1)
+……
+
+#library
+```{r}
+library(funModeling)
+library(gmodels)
+library(ggplot2)
+library(GGally)
+library(caret)
+library(nnet)
+library(gmodels)
+library(C50)
+library(NeuralNetTools)
+library(partykit)
+library(knitr)
+knitr::opts_chunk$set(fig.width=12, fig.height=12) 
+library(e1071)
+library(factoextra)
+library("corrplot")
+library(nnet)
+library(party)
+library(class)
+``` 
+
+```{r}
+data <- read.csv("~/Desktop/Rproject/data.csv")
+``` 
+# Inspect the datasets
+```{r}
+str(data)
+``` 
+ 
+#Check NA in Data and Identify columns with NA
+```{r}
+sum(complete.cases(data)) == nrow(data)
+colnames(data)[colSums(is.na(data)) > 0]
+``` 
+# Remove unwanted columns from the original data
+#X’ has all the values as ‘NA’ and from the description of the dataset, ‘id’ corresponds to the patient identifier. These columns can be removed to have a better dataset.
+```{r}
+data <- subset(data, select = -c(X))
+data <- data[,-1]
+``` 
+#Inspect the datasets again
+```{r}
+str(data)
+summary(data)
+``` 
+As we notice, there is no any ‘NA’, this data is clean enough to proceed with further processing
+#correlation
+```{r}
+ggpairs(data[,c(2:11,1)], aes(color=diagnosis, alpha=0.75), lower=list(continuous="smooth"))+ theme_bw()+
+  labs(title="Cancer Mean")+
+  theme(plot.title=element_text(face='bold',color='black',hjust=0.5,size=12))
+``` 
+There is a great correlation between some variables.
+
+ # PCA 
+ 
+```{r}
+ data_pca <- transform(data)
+pca <- prcomp(data[,-1], retx=TRUE, center=TRUE, scale=TRUE)
+summary(pca)
+
+```
+The first two components explains the 0.6324 of the variance. 
+We need 10 principal components to explain more than 0.95157 of 
+the variance and 17 to explain more than 0.99113.
+
+#Screeplot
+#View Point : principal components where the line lies.
+```{r}
+fviz_eig(pca, addlabels=TRUE, ylim=c(0,60), geom = c("bar", "line"), barfill = "red", barcolor="grey",linecolor = "black", ncp=10)+
+  labs(title = "Cancer Variances - PCA",
+       x = "Principal Components", y = "% of variances")
+```
+#Get PCA Variables
+```{r}
+ var <- get_pca_var(pca)
+ var
+```
+#Quality of representation of PCA
+#Correlation between variables and PCA
+```{r}
+corrplot(var$cos2, is.corr=FALSE)
+```
+
+#Make test & train dataset for testing classification ML methods
+```{r}
+set.seed(1234)
+samp <- sample(nrow(data), nrow(data)*0.75)
+data.train <- data.frame(data[samp,])
+data.test <- data.frame(data[-samp,])
+```
+
+#Apply every ML methods and compare each other and choose best fits
+
+# Set/create Control base on above observation
+```{r}
+Control <- trainControl(method="cv",
+                           number = 5,
+                           preProcOptions = list(thresh = 0.99), # threshold for pca preprocess
+                           classProbs = TRUE,
+                           summaryFunction = twoClassSummary)
+```
+
+# The Neural Network model 
+```{r}
+model_nnet <- train(diagnosis~.,
+                    data.train,
+                    method="nnet")
+                
+pred_nnet <- predict(model_nnet, data.test)
+cm_nnet <- confusionMatrix(pred_nnet, data.test$diagnosis, positive = "M")
+```
+
+```{r}
+cm_nnet
+```
+# The Neural Network model with PCA
+```{r}
+model_pca_nnet <- train(diagnosis~.,
+                        data.train,
+                        method="nnet",
+                        preProcess=c('pca'))
+                         
+pred_pca_nnet <- predict(model_pca_nnet, data.test)
+cm_pca_nnet <- confusionMatrix(pred_pca_nnet, data.test$diagnosis, positive = "M")
+```
+
+```{r}
+cm_pca_nnet
+```
+#Comparing Neural Network vs Neural Network model with PCA
+```{r}
+nn_list <- list(nn=cm_nnet , pca_nn=cm_pca_nnet)
+nn_list_results <- sapply(nn_list, function(x) x$byClass)
+nn_list_results
+```
+Based on above result, we conclude that the Neural Network model with PCA has better result, which it has has a sensibility of 0.9824561 with a F1 score of 0.9824561.
+
+#C50
+
+```{r}
+learn_c50 <- C5.0(data.train[,-1],data.train$diagnosis, trControl=Control)
+pre_c50 <- predict(learn_c50,data.test[,-1])
+cm_c50 <- confusionMatrix(pre_c50, data.test$diagnosis)
+cm_c50
+```
+#ctree
+
+```{r}
+learn_ct <- ctree(diagnosis~., data=data.train,controls=ctree_control(maxdepth=2))
+pre_ct   <- predict(learn_ct, data.test[,-1])
+cm_ct    <- confusionMatrix(pre_ct, data.test$diagnosis)
+cm_ct
+```
+#knn
+# identify k to show best performance in KNN
+```{r}
+acc_data.test<- numeric() 
+
+for(i in 1:30){
+  predict <- knn(train=data.train[,-1], test=data.test[,-1], cl=data.train[,1], k=i, prob=T)
+  acc_data.test <- c(acc_data.test,mean(predict==data.test[,1]))
+}
+
+acc <- data.frame(k= seq(1,30), cnt = acc_data.test)
+opt_k <- subset(acc, cnt==max(cnt))[1,]
+sub <- paste("Optimal number of k is", opt_k$k, "(accuracy :", opt_k$cnt,") in KNN")
+sub 
+```
+# Apply optimal k
+```{r}
+pre_knn <- knn(train = data.train[,-1], test = data.test[,-1], cl = data.train[,1], k=opt_k$k, prob=T)
+cm_knn  <- confusionMatrix(pre_knn, data.test$diagnosis)
+cm_knn
+```
+# SVM
+```{r}
+learn_svm <- svm(diagnosis~., data=data.train, trControl=Control )
+pre_svm <- predict(learn_svm, data.test[,-1])
+cm_svm <- confusionMatrix(pre_svm, data.test$diagnosis)
+cm_svm
+```
+
+#NaiveBayes
+#Get Laplace to show th best predict performance in NB
+```{r}
+acc_test <- numeric()
+accuracy1 <- NULL; accuracy2 <- NULL
+
+for(i in 1:30){
+  learn_imp_nb <- naiveBayes(data.train[,-1], data.train$diagnosis, laplace=i)    
+  p_nb <- predict(learn_imp_nb, data.test[,-1]) 
+  accuracy1 <- confusionMatrix(p_nb, data.test$diagnosis)
+  accuracy2[i] <- accuracy1$overall[1]
+}
+
+acc <- data.frame(l= seq(1,30), cnt = accuracy2)
+
+opt_l <- subset(acc, cnt==max(cnt))[1,]
+sub <- paste("Optimal number of laplace is", opt_l$l, "(accuracy :", opt_l$cnt,") in naiveBayes")
+sub 
+```
+# Apply laplace in NB
+```{r}
+nb <- naiveBayes(data.train[,-1], data.train$diagnosis, trControl=Control )
+pre_nb <- predict( nb, data.test[,-1])
+cm_nb <- confusionMatrix(pre_nb, data.test$diagnosis)        
+cm_nb
+```
+#Compariing all Ml methods. 
+```{r}
+cm_list <- list(pca_nn=cm_pca_nnet, c50=cm_c50, 
+                ct=cm_ct, PCA_NNET=cm_pca_nnet, kn=cm_knn, 
+                SVM=cm_svm, NB=cm_nb)
+cm_list_results <- sapply(cm_list, function(x) x$byClass)
+cm_list_results
+```
+#Find out the best one
+```{r}
+cm_results_max <- apply(cm_list_results, 1, which.is.max)
+cm_results_max
+```
+```{r}
+output_report <- data.frame(metric=names(cm_results_max), 
+                            best_model=colnames(cm_list_results)[cm_results_max],
+                            value=mapply(function(x,y) {cm_list_results[x,y]}, 
+                                         names(cm_results_max), 
+                                         cm_results_max))
+rownames(output_report) <- NULL
+output_report
+```
+The best results for sesitivity( detection of breast cases) is KNN.
+
+Conclustion: We have found a model based on k-nearest neighbors has good results over the test set. This model has the highest sensibility of 1.0 with a highest detection rate of 0.6013986. Using this data, I suggest that we diagnose patients and predict the likelihood of a breast cancer by using k-nearest neighbors algorithm. which has higher sesitivity. 
+
+Improvement or Recomendation
+Modify model to use different parameter, such as ROC, scale, mean...
+Try LDA instead of PCAT;
+Try more ML model
+....
+
+Reference:
+https://www.kaggle.com/mirichoi0218/classification-breast-cancer-or-not-with-15-ml/notebook
+
+
